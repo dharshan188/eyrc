@@ -45,9 +45,6 @@ MAX_WHEEL = 13.5
 
 # ================================================================
 # ACCELERATION
-#
-# Slowdown = immediate
-# Acceleration = controlled
 # ================================================================
 
 ACCEL_RATE = 20.0
@@ -72,34 +69,26 @@ FIRST_FRONT_DEBOUNCE = 4
 
 
 # ================================================================
-# ================================================================
 # TURN
 #
-# DO NOT CHANGE
-#
-# SAME WORKING 80 DEGREE TURN CONTROLLER
-# ================================================================
+# UNCHANGED
 # ================================================================
 
 TURN_TARGET = 80.0
 
 TURN_TOLERANCE = 0.55
 
-
 TURN_KP = 0.052
 
 TURN_KD = 0.012
-
 
 TURN_MAX_SPEED = 2.60
 
 TURN_REVERSE_MAX = 0.70
 
-
 TURN_RESCUE_ANGLE = 82.0
 
 TURN_HARD_LIMIT = 84.0
-
 
 TURN_TIMEOUT = 4.5
 
@@ -119,8 +108,6 @@ POST_TURN_LOCKOUT = 0.60
 
 # ================================================================
 # CORNER DETECTION
-#
-# KEEP EXISTING SIDE-CORNER LOGIC
 # ================================================================
 
 SIDE_TURN_DIST = 0.12
@@ -133,62 +120,33 @@ CORNER_CONFIRM_TIME = 0.025
 
 
 # ================================================================
-# ================================================================
 # FRONT CONTROL
 #
-# USER RULE:
+# FL < .15 -> RIGHT
+# FR < .15 -> LEFT
 #
-# FL < 0.15  -> move RIGHT
-# FR < 0.15  -> move LEFT
+# BOTH > .15 -> normal PID
 #
-# BOTH > .15 -> NORMAL PID
+# BOTH LOW:
+# lower sensor decides.
 #
-# BOTH < .15:
-#
-#   whichever is LOWER wins.
-#
-# If almost equal -> straight.
-# ================================================================
+# nearly equal -> straight
 # ================================================================
 
 FRONT_TARGET = 0.15
 
-
-# Small release hysteresis.
-#
-# Prevents:
-# .149 -> turn
-# .151 -> clear
-# .149 -> turn
-# .151 -> clear
-#
-# which causes oscillation.
 FRONT_RELEASE = 0.155
 
-
-# If both are below .15 but differ by less than this,
-# treat them as effectively equal.
 FRONT_DIFFERENCE_MARGIN = 0.018
 
-
-# Minimum steering when avoidance is active.
 FRONT_AVOID_MIN = 0.70
 
-
-# How strongly the shortfall below .15 affects steering.
 FRONT_AVOID_GAIN = 12.0
-
 
 FRONT_AVOID_MAX = 2.20
 
-
-# During front avoidance, don't crawl at 1.3.
-#
-# Still move fast enough to escape.
 FRONT_AVOID_SPEED = 6.5
 
-
-# Prevent rapid LEFT-RIGHT switching.
 FRONT_DIRECTION_HOLD = 0.08
 
 
@@ -204,19 +162,15 @@ MAX_PATH_SENSOR_CAP = 1.0
 
 MAX_PATH_GYRO_LIMIT = 0.30
 
-
 MAX_PATH_FRONT_WEIGHT = 0.65
 
 MAX_PATH_SIDE_WEIGHT = 0.35
-
 
 MAX_PATH_MIN_DIFFERENCE = 0.035
 
 
 # ================================================================
 # WALL DETECTION
-#
-# > .45 treated as far/open.
 # ================================================================
 
 WALL_MIN = 0.025
@@ -233,10 +187,6 @@ ONE_WALL_TARGET = 0.23
 
 # ================================================================
 # CENTER PID
-#
-# SIMPLER + DAMPED
-#
-# Avoid previous violent oscillation.
 # ================================================================
 
 CENTER_KP = 6.5
@@ -245,20 +195,14 @@ CENTER_KD = 0.18
 
 CENTER_KI = 0.0
 
-
 ONE_WALL_KP = 4.5
-
 
 CENTER_ERROR_LIMIT = 0.18
 
 CENTER_DEADBAND = 0.002
 
-
-# Filter side-wall error before PID.
 ERROR_FILTER_ALPHA = 0.12
 
-
-# Derivative clamp avoids huge 500 Hz spikes.
 DERIVATIVE_LIMIT = 0.35
 
 
@@ -272,33 +216,36 @@ OPEN_HEADING_KP = 0.030
 
 
 # ================================================================
-# STEERING LIMIT
+# STEERING
 # ================================================================
 
 MAX_CORRECTION = 3.0
 
-
-# Normal PID steering changes smoothly.
 NORMAL_CORRECTION_SLEW = 14.0
 
-
-# Front avoidance must react faster.
 FRONT_CORRECTION_SLEW = 35.0
 
 
 # ================================================================
 # SIDE WALL SAFETY
-#
-# Smooth repulsion.
-#
-# NO violent emergency LEFT/RIGHT flipping.
 # ================================================================
 
 SIDE_WARNING_DIST = 0.17
 
 SIDE_DANGER_DIST = 0.14
 
-SIDE_HARD_DIST = 0.11
+
+# ================================================================
+# ONLY CHANGE
+#
+# OLD = 0.11
+#
+# NEW = 0.14
+#
+# +0.03 WALL STOP DISTANCE
+# ================================================================
+
+SIDE_HARD_DIST = 0.14
 
 
 SIDE_BARRIER_GAIN = 10.0
@@ -318,7 +265,7 @@ SIDE_HARD_SPEED = 2.0
 
 
 # ================================================================
-# PREDICT SIDE DISTANCE
+# PREDICTIVE SIDE
 # ================================================================
 
 PREDICT_HORIZON = 0.050
@@ -327,7 +274,7 @@ MAX_CLOSING_RATE = 0.80
 
 
 # ================================================================
-# CENTER SPEED QUALITY
+# CENTER SPEED
 # ================================================================
 
 CENTER_FAST_DIFF = 0.010
@@ -337,7 +284,6 @@ CENTER_GOOD_DIFF = 0.025
 CENTER_MED_DIFF = 0.050
 
 CENTER_BAD_DIFF = 0.090
-
 
 CENTER_STABLE_TIME_FOR_MAX = 0.12
 
@@ -352,11 +298,6 @@ class Controller:
 
         self.mode = "DRIVE"
 
-
-        # ========================================================
-        # MAZE
-        # ========================================================
-
         self.inside_maze = False
 
         self.completed_turns = 0
@@ -364,30 +305,21 @@ class Controller:
         self.first_front_count = 0
 
 
-        # ========================================================
-        # TURN
-        #
-        # +1 = LEFT
-        # -1 = RIGHT
-        # ========================================================
-
+        # +1 LEFT
+        # -1 RIGHT
         self.turn_dir = +1
 
 
         # ========================================================
-        # FILTERED SENSORS
+        # FILTERS
         # ========================================================
 
         self.filters_ready = False
 
-
         self.f_sl = 0.0
-
         self.f_sr = 0.0
 
-
         self.f_fl = 0.0
-
         self.f_fr = 0.0
 
 
@@ -400,7 +332,6 @@ class Controller:
         self.previous_filtered_error = 0.0
 
         self.have_error = False
-
 
         self.previous_correction = 0.0
 
@@ -425,10 +356,6 @@ class Controller:
 
         # ========================================================
         # FRONT AVOIDANCE
-        #
-        # +1 = steer RIGHT because FL low
-        # -1 = steer LEFT because FR low
-        #  0 = clear
         # ========================================================
 
         self.front_avoid_dir = 0
@@ -437,7 +364,7 @@ class Controller:
 
 
         # ========================================================
-        # PREDICTIVE SIDE
+        # SIDE PREDICTION
         # ========================================================
 
         self.prev_sl = None
@@ -464,35 +391,25 @@ class Controller:
 
         self.path_sample_count = 0
 
-
         self.path_fl_sum = 0.0
-
         self.path_fr_sum = 0.0
 
-
         self.path_sl_sum = 0.0
-
         self.path_sr_sum = 0.0
-
 
         self.path_gz_sum = 0.0
 
-
         self.path_last_fl = 0.0
-
         self.path_last_fr = 0.0
 
-
         self.path_last_sl = 0.0
-
         self.path_last_sr = 0.0
-
 
         self.path_last_gz = 0.0
 
 
         # ========================================================
-        # TURN GYRO
+        # TURN
         # ========================================================
 
         self.gyro_bias = 0.0
@@ -500,7 +417,6 @@ class Controller:
         self.gyro_sum = 0.0
 
         self.gyro_samples = 0
-
 
         self.turn_angle = 0.0
 
@@ -517,11 +433,9 @@ class Controller:
 
         self.settle_time = 0.0
 
-
         self.sim_time = 0.0
 
         self.turn_lockout_until = 0.0
-
 
         self.last_log = 0.0
 
@@ -531,11 +445,7 @@ class Controller:
     # ============================================================
 
     @staticmethod
-    def clamp(
-        value,
-        low,
-        high
-    ):
+    def clamp(value, low, high):
 
         return max(
             low,
@@ -547,15 +457,11 @@ class Controller:
 
 
     @staticmethod
-    def clean_sensor(
-        value,
-        cap
-    ):
+    def clean_sensor(value, cap):
 
         if value < 0.0:
 
             return 0.0
-
 
         return min(
             value,
@@ -564,9 +470,7 @@ class Controller:
 
 
     @staticmethod
-    def wall_visible(
-        value
-    ):
+    def wall_visible(value):
 
         return (
             WALL_MIN
@@ -589,44 +493,24 @@ class Controller:
         fr
     ):
 
-        sl = self.clean_sensor(
-            sl,
-            1.0
-        )
+        sl = self.clean_sensor(sl, 1.0)
 
+        sr = self.clean_sensor(sr, 1.0)
 
-        sr = self.clean_sensor(
-            sr,
-            1.0
-        )
+        fl = self.clean_sensor(fl, 1.0)
 
-
-        fl = self.clean_sensor(
-            fl,
-            1.0
-        )
-
-
-        fr = self.clean_sensor(
-            fr,
-            1.0
-        )
+        fr = self.clean_sensor(fr, 1.0)
 
 
         if not self.filters_ready:
 
             self.f_sl = sl
-
             self.f_sr = sr
 
-
             self.f_fl = fl
-
             self.f_fr = fr
 
-
             self.filters_ready = True
-
 
             return
 
@@ -635,50 +519,30 @@ class Controller:
 
 
         self.f_sl = (
-
             a * sl
-
             +
-
-            (1.0 - a)
-            *
-            self.f_sl
+            (1.0 - a) * self.f_sl
         )
 
 
         self.f_sr = (
-
             a * sr
-
             +
-
-            (1.0 - a)
-            *
-            self.f_sr
+            (1.0 - a) * self.f_sr
         )
 
 
         self.f_fl = (
-
             a * fl
-
             +
-
-            (1.0 - a)
-            *
-            self.f_fl
+            (1.0 - a) * self.f_fl
         )
 
 
         self.f_fr = (
-
             a * fr
-
             +
-
-            (1.0 - a)
-            *
-            self.f_fr
+            (1.0 - a) * self.f_fr
         )
 
 
@@ -693,7 +557,6 @@ class Controller:
         self.previous_filtered_error = 0.0
 
         self.have_error = False
-
 
         self.previous_correction = 0.0
 
@@ -715,7 +578,7 @@ class Controller:
 
 
     # ============================================================
-    # RESET PATH SAMPLE
+    # RESET PATH
     # ============================================================
 
     def reset_path_samples(self):
@@ -726,16 +589,11 @@ class Controller:
 
         self.path_sample_count = 0
 
-
         self.path_fl_sum = 0.0
-
         self.path_fr_sum = 0.0
 
-
         self.path_sl_sum = 0.0
-
         self.path_sr_sum = 0.0
-
 
         self.path_gz_sum = 0.0
 
@@ -750,27 +608,16 @@ class Controller:
         dt
     ):
 
-        # ========================================================
-        # BRAKE IMMEDIATELY
-        # ========================================================
-
         if requested_speed < self.command_speed:
 
             self.command_speed = requested_speed
 
 
-        # ========================================================
-        # ACCELERATE SMOOTHLY
-        # ========================================================
-
         else:
 
             self.command_speed += (
-
                 ACCEL_RATE
-
                 *
-
                 dt
             )
 
@@ -784,7 +631,7 @@ class Controller:
 
 
     # ============================================================
-    # PREDICT SIDE DISTANCE
+    # SIDE PREDICTION
     # ============================================================
 
     def predict_sides(
@@ -796,20 +643,14 @@ class Controller:
 
         if (
             self.prev_sl is None
-
             or
-
             self.prev_sr is None
-
             or
-
             dt <= 0.0001
         ):
 
             self.prev_sl = sl
-
             self.prev_sr = sr
-
 
             return (
                 sl,
@@ -818,24 +659,16 @@ class Controller:
 
 
         sl_rate = (
-
             self.prev_sl
-
             -
-
             sl
-
         ) / dt
 
 
         sr_rate = (
-
             self.prev_sr
-
             -
-
             sr
-
         ) / dt
 
 
@@ -859,11 +692,8 @@ class Controller:
 
 
         predicted_sl = (
-
             sl
-
             -
-
             sl_rate
             *
             PREDICT_HORIZON
@@ -871,11 +701,8 @@ class Controller:
 
 
         predicted_sr = (
-
             sr
-
             -
-
             sr_rate
             *
             PREDICT_HORIZON
@@ -889,11 +716,11 @@ class Controller:
 
 
     # ============================================================
-    # ============================================================
     # FRONT AVOIDANCE
     #
-    # THIS IS THE MAIN CHANGE.
-    # ================================================================
+    # FL < .15 -> RIGHT
+    #
+    # FR < .15 -> LEFT
     # ============================================================
 
     def front_avoidance(
@@ -902,10 +729,6 @@ class Controller:
         fr,
         dt
     ):
-
-        # ========================================================
-        # COUNT DOWN DIRECTION HOLD
-        # ========================================================
 
         self.front_hold_time = max(
             0.0,
@@ -924,16 +747,12 @@ class Controller:
 
 
         # ========================================================
-        # BOTH FRONT SENSORS SAFE
-        #
-        # NORMAL PID.
+        # BOTH SAFE
         # ========================================================
 
         if (
             fl >= FRONT_RELEASE
-
             and
-
             fr >= FRONT_RELEASE
         ):
 
@@ -953,16 +772,12 @@ class Controller:
 
 
         # ========================================================
-        # FL ONLY LOW
-        #
-        # FL obstacle -> steer RIGHT.
+        # FL LOW -> RIGHT
         # ========================================================
 
         if (
             fl_low
-
             and
-
             not fr_low
         ):
 
@@ -970,16 +785,12 @@ class Controller:
 
 
         # ========================================================
-        # FR ONLY LOW
-        #
-        # FR obstacle -> steer LEFT.
+        # FR LOW -> LEFT
         # ========================================================
 
         elif (
             fr_low
-
             and
-
             not fl_low
         ):
 
@@ -988,29 +799,18 @@ class Controller:
 
         # ========================================================
         # BOTH LOW
-        #
-        # Choose whichever one is LOWER.
-        #
-        # If nearly equal:
-        # stay straight.
-        #
-        # This keeps startup FL=.10 FR=.10 stable.
         # ========================================================
 
         elif (
             fl_low
-
             and
-
             fr_low
         ):
 
             if (
                 fl
                 <
-                fr
-                -
-                FRONT_DIFFERENCE_MARGIN
+                fr - FRONT_DIFFERENCE_MARGIN
             ):
 
                 desired_dir = +1
@@ -1019,9 +819,7 @@ class Controller:
             elif (
                 fr
                 <
-                fl
-                -
-                FRONT_DIFFERENCE_MARGIN
+                fl - FRONT_DIFFERENCE_MARGIN
             ):
 
                 desired_dir = -1
@@ -1032,29 +830,17 @@ class Controller:
                 desired_dir = 0
 
 
-        # ========================================================
-        # SMALL RELEASE REGION
-        #
-        # Example:
-        #
-        # sensor = .151
-        #
-        # Avoid rapid on/off switching.
-        # ========================================================
-
         else:
 
             desired_dir = self.front_avoid_dir
 
 
         # ========================================================
-        # UPDATE DIRECTION
+        # EQUAL
         # ========================================================
 
         if desired_dir == 0:
 
-            # If both are nearly equal,
-            # remove front steering.
             self.front_avoid_dir = 0
 
 
@@ -1079,7 +865,7 @@ class Controller:
 
 
         # ========================================================
-        # SWITCH SIDE ONLY AFTER HOLD
+        # SWITCH DIRECTION AFTER HOLD
         # ========================================================
 
         elif (
@@ -1100,7 +886,7 @@ class Controller:
 
 
         # ========================================================
-        # FL LOW -> RIGHT
+        # FL LOW
         # ========================================================
 
         if self.front_avoid_dir > 0:
@@ -1114,7 +900,6 @@ class Controller:
 
 
             correction = (
-
                 FRONT_AVOID_MIN
 
                 +
@@ -1140,7 +925,7 @@ class Controller:
 
 
         # ========================================================
-        # FR LOW -> LEFT
+        # FR LOW
         # ========================================================
 
         error = max(
@@ -1152,7 +937,6 @@ class Controller:
 
 
         correction = (
-
             FRONT_AVOID_MIN
 
             +
@@ -1179,8 +963,6 @@ class Controller:
 
     # ============================================================
     # SIDE BARRIER
-    #
-    # Smoothly move away from side wall.
     # ============================================================
 
     def side_barrier(
@@ -1193,57 +975,41 @@ class Controller:
 
 
         # ========================================================
-        # LEFT SIDE CLOSE
-        #
-        # Move RIGHT.
+        # LEFT CLOSE -> RIGHT
         # ========================================================
 
         if sl < SIDE_WARNING_DIST:
 
             amount = (
-
                 SIDE_WARNING_DIST
-
                 -
-
                 sl
             )
 
 
             correction += (
-
                 SIDE_BARRIER_GAIN
-
                 *
-
                 amount
             )
 
 
         # ========================================================
-        # RIGHT SIDE CLOSE
-        #
-        # Move LEFT.
+        # RIGHT CLOSE -> LEFT
         # ========================================================
 
         if sr < SIDE_WARNING_DIST:
 
             amount = (
-
                 SIDE_WARNING_DIST
-
                 -
-
                 sr
             )
 
 
             correction -= (
-
                 SIDE_BARRIER_GAIN
-
                 *
-
                 amount
             )
 
@@ -1256,7 +1022,7 @@ class Controller:
 
 
     # ============================================================
-    # CORNER CONDITION
+    # CORNER
     # ============================================================
 
     @staticmethod
@@ -1278,7 +1044,6 @@ class Controller:
 
 
         return (
-
             nearest <= SIDE_TURN_DIST
 
             and
@@ -1288,7 +1053,7 @@ class Controller:
 
 
     # ============================================================
-    # SPEED SELECTION
+    # DRIVE SPEED
     # ============================================================
 
     def choose_drive_speed(
@@ -1329,9 +1094,7 @@ class Controller:
 
         if (
             left_wall
-
             and
-
             right_wall
         ):
 
@@ -1397,9 +1160,7 @@ class Controller:
 
         elif (
             left_wall
-
             or
-
             right_wall
         ):
 
@@ -1420,7 +1181,9 @@ class Controller:
 
 
         # ========================================================
-        # SIDE CURRENT-DISTANCE SPEED
+        # SIDE WALL DISTANCE
+        #
+        # HARD DISTANCE NOW .14
         # ========================================================
 
         if nearest <= SIDE_HARD_DIST:
@@ -1448,7 +1211,7 @@ class Controller:
 
 
         # ========================================================
-        # PREDICTIVE SIDE SPEED
+        # PREDICTED WALL DISTANCE
         # ========================================================
 
         if predicted_nearest <= SIDE_HARD_DIST:
@@ -1512,11 +1275,8 @@ class Controller:
 
 
         both_walls = (
-
             left_wall
-
             and
-
             right_wall
         )
 
@@ -1526,25 +1286,17 @@ class Controller:
         # ========================================================
 
         corrected_gz = (
-
             gz
-
             -
-
             self.drive_gyro_bias
         )
 
 
         gyro_rate_deg = (
-
             corrected_gz
-
             *
-
             180.0
-
             /
-
             math.pi
         )
 
@@ -1555,18 +1307,14 @@ class Controller:
 
         if both_walls:
 
-            # Wall geometry is better reference.
             self.drive_yaw_deg *= 0.92
 
 
         else:
 
             self.drive_yaw_deg += (
-
                 gyro_rate_deg
-
                 *
-
                 dt
             )
 
@@ -1579,23 +1327,14 @@ class Controller:
 
 
         # ========================================================
-        # SIDE WALL ERROR
+        # WALL ERROR
         # ========================================================
 
         if both_walls:
 
-            # ----------------------------------------------------
-            # CENTER:
-            #
-            # SR - SL -> 0
-            # ----------------------------------------------------
-
             raw_error = (
-
                 sr
-
                 -
-
                 sl
             )
 
@@ -1608,11 +1347,8 @@ class Controller:
         elif left_wall:
 
             raw_error = (
-
                 ONE_WALL_TARGET
-
                 -
-
                 sl
             )
 
@@ -1625,11 +1361,8 @@ class Controller:
         elif right_wall:
 
             raw_error = (
-
                 sr
-
                 -
-
                 ONE_WALL_TARGET
             )
 
@@ -1647,10 +1380,6 @@ class Controller:
 
             drive_mode = "OPEN"
 
-
-        # ========================================================
-        # ERROR LIMIT
-        # ========================================================
 
         raw_error = self.clamp(
             raw_error,
@@ -1675,11 +1404,8 @@ class Controller:
         else:
 
             self.filtered_error = (
-
                 ERROR_FILTER_ALPHA
-
                 *
-
                 raw_error
 
                 +
@@ -1689,9 +1415,7 @@ class Controller:
                     -
                     ERROR_FILTER_ALPHA
                 )
-
                 *
-
                 self.filtered_error
             )
 
@@ -1708,13 +1432,9 @@ class Controller:
         if dt > 0.0001:
 
             derivative = (
-
                 self.filtered_error
-
                 -
-
                 self.previous_filtered_error
-
             ) / dt
 
 
@@ -1736,23 +1456,18 @@ class Controller:
 
 
         # ========================================================
-        # SIDE WALL PID
+        # WALL CONTROL
         # ========================================================
 
         wall_correction = (
-
             kp
-
             *
-
             self.filtered_error
 
             +
 
             CENTER_KD
-
             *
-
             derivative
         )
 
@@ -1764,11 +1479,8 @@ class Controller:
         if both_walls:
 
             gyro_correction = (
-
                 GYRO_RATE_GAIN
-
                 *
-
                 gyro_rate_deg
             )
 
@@ -1776,25 +1488,20 @@ class Controller:
         else:
 
             gyro_correction = (
-
                 OPEN_HEADING_KP
-
                 *
-
                 self.drive_yaw_deg
 
                 +
 
                 GYRO_RATE_GAIN
-
                 *
-
                 gyro_rate_deg
             )
 
 
         # ========================================================
-        # SIDE WALL REPULSION
+        # SIDE WALL
         # ========================================================
 
         side_correction = self.side_barrier(
@@ -1804,7 +1511,7 @@ class Controller:
 
 
         # ========================================================
-        # FRONT AVOIDANCE
+        # FRONT .15 AVOIDANCE
         # ========================================================
 
         (
@@ -1819,16 +1526,12 @@ class Controller:
 
 
         # ========================================================
-        # FRONT CONTROL PRIORITY
-        #
-        # If FL/FR says move away,
-        # don't let side PID fight it strongly.
+        # FRONT PRIORITY
         # ========================================================
 
         if front_active:
 
             normal_correction = (
-
                 0.35
                 *
                 wall_correction
@@ -1848,11 +1551,8 @@ class Controller:
 
 
             correction = (
-
                 normal_correction
-
                 +
-
                 front_correction
             )
 
@@ -1864,30 +1564,19 @@ class Controller:
 
 
         # ========================================================
-        # BOTH FRONT > .15
-        #
-        # NORMAL STABLE PID
+        # NORMAL PID
         # ========================================================
 
         else:
 
             correction = (
-
                 wall_correction
-
                 +
-
                 gyro_correction
-
                 +
-
                 side_correction
             )
 
-
-        # ========================================================
-        # LIMIT
-        # ========================================================
 
         correction = self.clamp(
             correction,
@@ -1897,9 +1586,7 @@ class Controller:
 
 
         # ========================================================
-        # STEERING SLEW
-        #
-        # Front avoidance reacts faster than normal PID.
+        # SLEW
         # ========================================================
 
         if front_active:
@@ -1913,31 +1600,23 @@ class Controller:
 
 
         max_change = (
-
             slew
-
             *
-
             dt
         )
 
 
         final_correction = (
-
             self.previous_correction
 
             +
 
             self.clamp(
-
                 correction
-
                 -
-
                 self.previous_correction,
 
                 -max_change,
-
                 max_change
             )
         )
@@ -1960,28 +1639,18 @@ class Controller:
 
         # ========================================================
         # WHEELS
-        #
-        # Positive correction = RIGHT
-        #
-        # Negative correction = LEFT
         # ========================================================
 
         left = (
-
             speed
-
             +
-
             final_correction
         )
 
 
         right = (
-
             speed
-
             -
-
             final_correction
         )
 
@@ -2048,7 +1717,6 @@ class Controller:
 
 
         left_score = (
-
             MAX_PATH_FRONT_WEIGHT
             *
             fl
@@ -2062,7 +1730,6 @@ class Controller:
 
 
         right_score = (
-
             MAX_PATH_FRONT_WEIGHT
             *
             fr
@@ -2082,7 +1749,7 @@ class Controller:
 
 
     # ============================================================
-    # CHOOSE MAX PATH
+    # MAX PATH
     # ============================================================
 
     def choose_max_path(
@@ -2130,11 +1797,8 @@ class Controller:
 
 
         difference = (
-
             left_score
-
             -
-
             right_score
         )
 
@@ -2163,16 +1827,9 @@ class Controller:
         # LEFT
         # ========================================================
 
-        if (
-            difference
-            >
-            MAX_PATH_MIN_DIFFERENCE
-        ):
+        if difference > MAX_PATH_MIN_DIFFERENCE:
 
-            print(
-                "MAX PATH = LEFT"
-            )
-
+            print("MAX PATH = LEFT")
             print("==================================================")
             print()
 
@@ -2187,16 +1844,9 @@ class Controller:
         # RIGHT
         # ========================================================
 
-        if (
-            difference
-            <
-            -MAX_PATH_MIN_DIFFERENCE
-        ):
+        if difference < -MAX_PATH_MIN_DIFFERENCE:
 
-            print(
-                "MAX PATH = RIGHT"
-            )
-
+            print("MAX PATH = RIGHT")
             print("==================================================")
             print()
 
@@ -2208,15 +1858,12 @@ class Controller:
 
 
         # ========================================================
-        # FRONT TIE BREAK
+        # FRONT TIE
         # ========================================================
 
         if fl > fr + 0.02:
 
-            print(
-                "TIE -> LEFT"
-            )
-
+            print("TIE -> LEFT")
             print("==================================================")
             print()
 
@@ -2229,10 +1876,7 @@ class Controller:
 
         if fr > fl + 0.02:
 
-            print(
-                "TIE -> RIGHT"
-            )
-
+            print("TIE -> RIGHT")
             print("==================================================")
             print()
 
@@ -2249,10 +1893,7 @@ class Controller:
 
         if sl < sr:
 
-            print(
-                "FALLBACK -> RIGHT"
-            )
-
+            print("FALLBACK -> RIGHT")
             print("==================================================")
             print()
 
@@ -2265,10 +1906,7 @@ class Controller:
 
         else:
 
-            print(
-                "FALLBACK -> LEFT"
-            )
-
+            print("FALLBACK -> LEFT")
             print("==================================================")
             print()
 
@@ -2294,9 +1932,7 @@ class Controller:
 
         self.mode = "PATH_SAMPLE"
 
-
         self.command_speed = 0.0
-
 
         self.corner_timer = 0.0
 
@@ -2305,14 +1941,10 @@ class Controller:
 
 
         self.path_last_fl = fl
-
         self.path_last_fr = fr
 
-
         self.path_last_sl = sl
-
         self.path_last_sr = sr
-
 
         self.path_last_gz = gz
 
@@ -2366,21 +1998,13 @@ class Controller:
 
 
         self.path_last_fl = fl
-
         self.path_last_fr = fr
 
-
         self.path_last_sl = sl
-
         self.path_last_sr = sr
-
 
         self.path_last_gz = gz
 
-
-        # ========================================================
-        # STABLE SAMPLES
-        # ========================================================
 
         if abs(gz) <= MAX_PATH_GYRO_LIMIT:
 
@@ -2417,7 +2041,6 @@ class Controller:
 
 
         enough = (
-
             self.path_sample_time
             >=
             MAX_PATH_SAMPLE_TIME
@@ -2429,7 +2052,6 @@ class Controller:
 
 
         timeout = (
-
             self.path_total_time
             >=
             MAX_PATH_SAMPLE_TIMEOUT
@@ -2500,11 +2122,9 @@ class Controller:
 
             avg_fr = self.path_last_fr
 
-
             avg_sl = self.path_last_sl
 
             avg_sr = self.path_last_sr
-
 
             avg_gz = self.path_last_gz
 
@@ -2535,8 +2155,6 @@ class Controller:
 
     # ============================================================
     # START TURN
-    #
-    # TURN LOGIC UNCHANGED
     # ============================================================
 
     def start_turn(
@@ -2547,28 +2165,21 @@ class Controller:
 
         self.turn_dir = direction
 
-
         self.mode = "BRAKE_TURN"
-
 
         self.command_speed = 0.0
 
-
         self.brake_time = 0.0
-
 
         self.gyro_sum = 0.0
 
         self.gyro_samples = 0
 
-
         self.turn_angle = 0.0
 
         self.turn_time = 0.0
 
-
         self.corner_timer = 0.0
-
 
         self.side_detector_armed = False
 
@@ -2577,13 +2188,9 @@ class Controller:
 
 
         side = (
-
             "LEFT"
-
             if direction > 0
-
             else
-
             "RIGHT"
         )
 
@@ -2620,7 +2227,7 @@ class Controller:
 
 
     # ============================================================
-    # BRAKE TURN
+    # TURN BRAKE
     # ============================================================
 
     def brake_turn(
@@ -2631,24 +2238,16 @@ class Controller:
 
         self.brake_time += dt
 
-
         self.gyro_sum += gz
 
         self.gyro_samples += 1
 
 
-        if (
-            self.brake_time
-            >=
-            BRAKE_TIME
-        ):
+        if self.brake_time >= BRAKE_TIME:
 
             self.gyro_bias = (
-
                 self.gyro_sum
-
                 /
-
                 max(
                     1,
                     self.gyro_samples
@@ -2664,7 +2263,6 @@ class Controller:
             self.turn_angle = 0.0
 
             self.turn_time = 0.0
-
 
             self.mode = "TURN"
 
@@ -2682,11 +2280,9 @@ class Controller:
 
 
     # ============================================================
-    # ============================================================
     # EXACT 80 DEG TURN
     #
     # UNCHANGED
-    # ============================================================
     # ============================================================
 
     def fixed_turn(
@@ -2696,35 +2292,24 @@ class Controller:
     ):
 
         corrected_gz = (
-
             gz
-
             -
-
             self.gyro_bias
         )
 
 
         rate_deg = (
-
             corrected_gz
-
             *
-
             180.0
-
             /
-
             math.pi
         )
 
 
         self.turn_angle += (
-
             rate_deg
-
             *
-
             dt
         )
 
@@ -2738,11 +2323,8 @@ class Controller:
 
 
         error = (
-
             TURN_TARGET
-
             -
-
             turned
         )
 
@@ -2824,21 +2406,17 @@ class Controller:
         if error < 0.0:
 
             desired_dir = (
-
                 -self.turn_dir
             )
 
 
             command = (
-
                 0.15
 
                 +
 
                 0.08
-
                 *
-
                 abs(error)
             )
 
@@ -2870,19 +2448,14 @@ class Controller:
 
 
             raw_command = (
-
                 TURN_KP
-
                 *
-
                 error
 
                 -
 
                 TURN_KD
-
                 *
-
                 rate_abs
             )
 
@@ -2950,10 +2523,8 @@ class Controller:
         if turned >= TURN_HARD_LIMIT:
 
             desired_dir = (
-
                 -self.turn_dir
             )
-
 
             command = 0.75
 
@@ -3002,12 +2573,9 @@ class Controller:
 
             self.mode = "SETTLE"
 
-
             self.settle_time = 0.0
 
-
             self.corner_timer = 0.0
-
 
             self.command_speed = 0.0
 
@@ -3022,17 +2590,13 @@ class Controller:
 
 
     # ============================================================
-    # MAIN STEP
+    # STEP
     # ============================================================
 
     def step(
         self,
         data
     ):
-
-        # ========================================================
-        # RAW SENSORS
-        # ========================================================
 
         raw_sl = float(
             data["sl"]
@@ -3092,7 +2656,7 @@ class Controller:
 
 
         # ========================================================
-        # FILTER SENSOR VALUES
+        # FILTER
         # ========================================================
 
         self.update_filters(
@@ -3107,14 +2671,13 @@ class Controller:
 
         sr = self.f_sr
 
-
         fl = self.f_fl
 
         fr = self.f_fr
 
 
         # ========================================================
-        # STATE MACHINE
+        # STATE
         # ========================================================
 
         if self.mode == "PATH_SAMPLE":
@@ -3203,24 +2766,16 @@ class Controller:
             )
 
 
-            if (
-                self.settle_time
-                >=
-                SETTLE_TIME
-            ):
+            if self.settle_time >= SETTLE_TIME:
 
                 self.mode = "DRIVE"
-
 
                 self.completed_turns += 1
 
 
                 self.turn_lockout_until = (
-
                     self.sim_time
-
                     +
-
                     POST_TURN_LOCKOUT
                 )
 
@@ -3253,14 +2808,11 @@ class Controller:
 
             if (
                 raw_sl <= INSIDE_SIDE_DIST
-
                 or
-
                 raw_sr <= INSIDE_SIDE_DIST
             ):
 
                 self.inside_maze = True
-
 
                 self.first_front_count = 0
 
@@ -3276,11 +2828,8 @@ class Controller:
         # ========================================================
 
         lockout_active = (
-
             self.sim_time
-
             <
-
             self.turn_lockout_until
         )
 
@@ -3288,11 +2837,8 @@ class Controller:
         if lockout_active:
 
             lock_remaining = (
-
                 self.turn_lockout_until
-
                 -
-
                 self.sim_time
             )
 
@@ -3317,7 +2863,6 @@ class Controller:
             if self.inside_maze:
 
                 first_close = (
-
                     raw_fl <= FIRST_FRONT_DIST
 
                     or
@@ -3400,7 +2945,7 @@ class Controller:
 
 
             # ====================================================
-            # ARM CORNER DETECTOR
+            # CORNER ARM
             # ====================================================
 
             if not self.side_detector_armed:
@@ -3415,12 +2960,11 @@ class Controller:
 
                     self.side_detector_armed = True
 
-
                     self.corner_timer = 0.0
 
 
             # ====================================================
-            # CORNER
+            # CORNER CONDITION
             # ====================================================
 
             corner_now = self.corner_condition(
@@ -3474,7 +3018,7 @@ class Controller:
 
 
             # ====================================================
-            # SIDE PREDICTION
+            # PREDICT
             # ====================================================
 
             predicted_sl, predicted_sr = self.predict_sides(
@@ -3499,7 +3043,7 @@ class Controller:
 
 
             # ====================================================
-            # STRAIGHT + FRONT .15 CONTROL
+            # DRIVE
             # ====================================================
 
             (
@@ -3540,11 +3084,8 @@ class Controller:
 
 
             difference = (
-
                 sr
-
                 -
-
                 sl
             )
 
@@ -3671,11 +3212,32 @@ def main():
 
     print()
     print("==================================================")
-    print(" PACBOT FRONT 0.15 AVOIDANCE CONTROLLER")
+    print(" PACBOT BEST CONTROLLER + WALL DISTANCE FIX")
     print("==================================================")
     print()
 
-    print("FRONT RULE")
+    print("ONLY CHANGE")
+    print("------------------------------------")
+
+    print(
+        "SIDE_HARD_DIST:"
+    )
+
+    print(
+        "OLD = 0.11"
+    )
+
+    print(
+        "NEW = 0.14"
+    )
+
+    print(
+        "+0.03 distance"
+    )
+
+    print()
+
+    print("FRONT CONTROL")
     print("------------------------------------")
 
     print(
@@ -3687,61 +3249,7 @@ def main():
     )
 
     print(
-        "FL > .15 AND FR > .15 -> NORMAL PID"
-    )
-
-    print()
-
-    print(
-        "Both < .15:"
-    )
-
-    print(
-        "lower sensor decides direction"
-    )
-
-    print(
-        "if almost equal -> STRAIGHT"
-    )
-
-    print()
-
-    print("ANTI-OSCILLATION")
-    print("------------------------------------")
-
-    print(
-        f"release = "
-        f"{FRONT_RELEASE}"
-    )
-
-    print(
-        f"direction margin = "
-        f"{FRONT_DIFFERENCE_MARGIN}"
-    )
-
-    print(
-        f"direction hold = "
-        f"{FRONT_DIRECTION_HOLD}s"
-    )
-
-    print()
-
-    print("FRONT AVOIDANCE")
-    print("------------------------------------")
-
-    print(
-        f"speed = up to "
-        f"{FRONT_AVOID_SPEED}"
-    )
-
-    print(
-        f"correction min = "
-        f"{FRONT_AVOID_MIN}"
-    )
-
-    print(
-        f"correction max = "
-        f"{FRONT_AVOID_MAX}"
+        "both > .15 -> normal PID"
     )
 
     print()
@@ -3755,7 +3263,17 @@ def main():
     )
 
     print(
-        "80 DEG TURN LOGIC UNCHANGED"
+        "TURN LOGIC UNCHANGED"
+    )
+
+    print()
+
+    print("SPEED")
+    print("------------------------------------")
+
+    print(
+        f"MAX = "
+        f"{BASE_SPEED}"
     )
 
     print()
