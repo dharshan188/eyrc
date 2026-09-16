@@ -22,10 +22,13 @@ TOPIC_WHEEL_VEL = "pacbot/wheel_vel"
 # SPEED
 # ================================================================
 
+# Fast clear corridor
 BASE_SPEED = 5.0
 
+# After a turn
 SETTLE_SPEED = 2.2
 
+# During post-turn lockout
 LOCKOUT_SPEED = 3.0
 
 MAX_WHEEL = 6.0
@@ -47,7 +50,6 @@ FIRST_FRONT_DEBOUNCE = 4
 # ================================================================
 
 SCAN_LIMIT = 100.0
-
 SCAN_MIN_ANGLE = 25.0
 
 SCAN_SPEED = 1.20
@@ -57,18 +59,12 @@ SCAN_SENSOR_CAP = 1.0
 SCAN_SCORE_ALPHA = 0.05
 
 
-# ================================================================
-# IMPORTANT
-#
-# First turn always finishes at 90 degrees.
-# Scan best angle DOES NOT become final heading.
-# ================================================================
-
+# Final first-turn heading
 FIRST_FINAL_ANGLE = 90.0
 
 
 # ================================================================
-# FIRST ALIGN
+# FIRST TURN ALIGN
 # ================================================================
 
 ALIGN_TOLERANCE = 0.60
@@ -83,15 +79,15 @@ ALIGN_TIMEOUT = 4.0
 
 
 # ================================================================
-# AFTER FIRST TURN - CORNER DETECTION
+# AFTER FIRST TURN - REAL CORNER DETECTION
 #
-# Do not turn from one side sensor alone.
+# A random single low side reading must NOT cause a turn.
 #
 # Real corner:
 #
-# nearest side <= 0.12
+# min(SL, SR) <= 0.12
 # AND
-# farther side <= 0.16
+# max(SL, SR) <= 0.16
 # ================================================================
 
 SIDE_TURN_DIST = 0.12
@@ -104,29 +100,44 @@ CORNER_CONFIRM_TIME = 0.045
 
 
 # ================================================================
-# TURN DIRECTION
+# MAX PATH SAMPLING
 #
-# First use FL/FR openness.
+# When a real corner is found:
 #
-# Fallback:
-#
-# SL closer -> RIGHT
-# SR closer -> LEFT
+# STOP
+# collect FL FR SL SR
+# only accept samples when gyro is stable
+# average samples
+# choose MAX side
 # ================================================================
 
-DIRECTION_MARGIN = 0.06
+MAX_PATH_SAMPLE_TIME = 0.10
 
-DIRECTION_SENSOR_CAP = 1.0
+MAX_PATH_SAMPLE_TIMEOUT = 0.30
+
+MAX_PATH_SENSOR_CAP = 1.0
+
+MAX_PATH_GYRO_LIMIT = 0.20
+
+
+# Difference required to call one side clearly better.
+MAX_PATH_MIN_DIFFERENCE = 0.04
+
+
+# Front sensor gets slightly more importance.
+MAX_PATH_FRONT_WEIGHT = 0.60
+MAX_PATH_SIDE_WEIGHT = 0.40
 
 
 # ================================================================
 # FRONT COLLISION SAFETY
 #
-# FL <= 0.10 -> move RIGHT
+# After first turn:
 #
-# FR <= 0.10 -> move LEFT
+# FL <= 0.10 -> steer RIGHT
+# FR <= 0.10 -> steer LEFT
 #
-# BOTH <= 0.10 -> STOP
+# BOTH <= 0.10 -> STOP / decide path
 # ================================================================
 
 FRONT_SAFE_DIST = 0.10
@@ -134,7 +145,6 @@ FRONT_SAFE_DIST = 0.10
 FRONT_AVOID_GAIN = 18.0
 
 FRONT_AVOID_MIN = 0.50
-
 FRONT_AVOID_MAX = 1.50
 
 FRONT_AVOID_SPEED = 3.0
@@ -142,6 +152,10 @@ FRONT_AVOID_SPEED = 3.0
 
 # ================================================================
 # SIDE COLLISION SAFETY
+#
+# This is NOT a turn decision.
+#
+# It only pushes the robot away from a nearby wall.
 # ================================================================
 
 SIDE_SAFE_DIST = 0.11
@@ -149,16 +163,15 @@ SIDE_SAFE_DIST = 0.11
 SIDE_AVOID_GAIN = 16.0
 
 SIDE_AVOID_MIN = 0.45
-
 SIDE_AVOID_MAX = 1.40
 
 
-# Absolute danger.
+# Absolute last safety distance.
 SIDE_EMERGENCY_DIST = 0.075
 
 
 # ================================================================
-# SPEED CONTROL
+# ADAPTIVE SPEED
 # ================================================================
 
 SLOW_DIST_1 = 0.22
@@ -178,7 +191,7 @@ POST_TURN_LOCKOUT = 1.5
 
 
 # ================================================================
-# WALL FOLLOWING PID
+# WALL FOLLOW PID
 # ================================================================
 
 WALL_MIN = 0.025
@@ -189,9 +202,7 @@ TARGET_WALL = 0.18
 
 
 KP = 4.5
-
 KI = 0.04
-
 KD = 0.18
 
 KG = 0.90
@@ -211,7 +222,7 @@ SLEW_RATE = 10.0
 
 
 # ================================================================
-# 90 DEG TURN
+# EXACT 90 DEG TURN
 # ================================================================
 
 TURN_TARGET = 90.0
@@ -220,30 +231,21 @@ TURN_TOLERANCE = 0.60
 
 
 TURN_KP = 0.045
-
 TURN_KD = 0.010
 
 
 TURN_MAX_SPEED = 1.80
-
 TURN_MIN_SPEED = 0.72
 
 
 TURN_FINAL_ZONE = 10.0
-
 TURN_FINAL_MAX = 0.85
 
 
 TURN_TIMEOUT = 7.0
 
 
-# ================================================================
-# HARD ANGLE SAFETY
-#
-# Even if gyro/control becomes weird,
-# never intentionally continue past 95 degrees.
-# ================================================================
-
+# Hard safety
 TURN_HARD_LIMIT = 95.0
 
 
@@ -273,6 +275,7 @@ class Controller:
         # BRAKE_FIRST
         # FIRST_SCAN
         # FIRST_ALIGN
+        # PATH_SAMPLE
         # BRAKE_90
         # TURN_90
         # TURN_STOP
@@ -319,7 +322,7 @@ class Controller:
 
 
         # ========================================================
-        # CORNER
+        # CORNER DETECTOR
         # ========================================================
 
         self.side_detector_armed = False
@@ -328,7 +331,7 @@ class Controller:
 
 
         # ========================================================
-        # TURN DIRECTION
+        # TURN
         #
         # +1 = LEFT
         # -1 = RIGHT
@@ -368,6 +371,36 @@ class Controller:
 
 
         # ========================================================
+        # MAX PATH SAMPLING
+        # ========================================================
+
+        self.path_sample_time = 0.0
+
+        self.path_total_time = 0.0
+
+        self.path_sample_count = 0
+
+
+        self.path_fl_sum = 0.0
+        self.path_fr_sum = 0.0
+
+        self.path_sl_sum = 0.0
+        self.path_sr_sum = 0.0
+
+        self.path_gz_sum = 0.0
+
+
+        # Last measurements used as fallback.
+        self.path_last_fl = 0.0
+        self.path_last_fr = 0.0
+
+        self.path_last_sl = 0.0
+        self.path_last_sr = 0.0
+
+        self.path_last_gz = 0.0
+
+
+        # ========================================================
         # TIMERS
         # ========================================================
 
@@ -386,14 +419,14 @@ class Controller:
 
 
         # ========================================================
-        # LOGGING
+        # LOG
         # ========================================================
 
         self.last_log = 0.0
 
 
     # ============================================================
-    # HELPER
+    # HELPERS
     # ============================================================
 
     @staticmethod
@@ -412,10 +445,6 @@ class Controller:
         )
 
 
-    # ============================================================
-    # WALL VISIBLE
-    # ============================================================
-
     @staticmethod
     def wall_visible(value):
 
@@ -427,10 +456,6 @@ class Controller:
             WALL_MAX
         )
 
-
-    # ============================================================
-    # CLEAN SENSOR
-    # ============================================================
 
     @staticmethod
     def clean_sensor(
@@ -467,7 +492,29 @@ class Controller:
 
 
     # ============================================================
-    # FRONT SAFETY
+    # RESET MAX PATH SAMPLES
+    # ============================================================
+
+    def reset_path_samples(self):
+
+        self.path_sample_time = 0.0
+
+        self.path_total_time = 0.0
+
+        self.path_sample_count = 0
+
+
+        self.path_fl_sum = 0.0
+        self.path_fr_sum = 0.0
+
+        self.path_sl_sum = 0.0
+        self.path_sr_sum = 0.0
+
+        self.path_gz_sum = 0.0
+
+
+    # ============================================================
+    # FRONT COLLISION SAFETY
     # ============================================================
 
     def front_safety(
@@ -485,9 +532,9 @@ class Controller:
         )
 
 
-        # --------------------------------------------------------
-        # BOTH CLOSE
-        # --------------------------------------------------------
+        # ========================================================
+        # BOTH TOO CLOSE
+        # ========================================================
 
         if (
             fl_close
@@ -502,11 +549,11 @@ class Controller:
             )
 
 
-        # --------------------------------------------------------
-        # FL CLOSE
+        # ========================================================
+        # FL TOO CLOSE
         #
-        # Move RIGHT
-        # --------------------------------------------------------
+        # Steer RIGHT
+        # ========================================================
 
         if fl_close:
 
@@ -538,11 +585,11 @@ class Controller:
             )
 
 
-        # --------------------------------------------------------
-        # FR CLOSE
+        # ========================================================
+        # FR TOO CLOSE
         #
-        # Move LEFT
-        # --------------------------------------------------------
+        # Steer LEFT
+        # ========================================================
 
         if fr_close:
 
@@ -582,7 +629,7 @@ class Controller:
 
 
     # ============================================================
-    # SIDE SAFETY
+    # SIDE COLLISION SAFETY
     # ============================================================
 
     def side_safety(
@@ -613,11 +660,11 @@ class Controller:
             )
 
 
-        # --------------------------------------------------------
-        # LEFT SIDE TOO CLOSE
+        # ========================================================
+        # LEFT SIDE CLOSE
         #
-        # Move RIGHT
-        # --------------------------------------------------------
+        # Push RIGHT
+        # ========================================================
 
         if sl_close:
 
@@ -648,11 +695,11 @@ class Controller:
             )
 
 
-        # --------------------------------------------------------
-        # RIGHT SIDE TOO CLOSE
+        # ========================================================
+        # RIGHT SIDE CLOSE
         #
-        # Move LEFT
-        # --------------------------------------------------------
+        # Push LEFT
+        # ========================================================
 
         if sr_close:
 
@@ -690,7 +737,7 @@ class Controller:
 
 
     # ============================================================
-    # STRAIGHT PID
+    # PID DRIVE
     # ============================================================
 
     def pid_drive(
@@ -701,13 +748,13 @@ class Controller:
         fr,
         gz,
         dt,
-        speed
+        speed,
+        use_collision_safety=True
     ):
 
         left_wall = self.wall_visible(
             sl
         )
-
 
         right_wall = self.wall_visible(
             sr
@@ -734,7 +781,7 @@ class Controller:
 
 
         # ========================================================
-        # LEFT WALL
+        # LEFT WALL ONLY
         # ========================================================
 
         elif left_wall:
@@ -749,7 +796,7 @@ class Controller:
 
 
         # ========================================================
-        # RIGHT WALL
+        # RIGHT WALL ONLY
         # ========================================================
 
         elif right_wall:
@@ -764,7 +811,7 @@ class Controller:
 
 
         # ========================================================
-        # NO SIDE WALL
+        # NO WALL
         # ========================================================
 
         else:
@@ -775,7 +822,7 @@ class Controller:
 
 
         # ========================================================
-        # DEADBAND
+        # ERROR LIMIT
         # ========================================================
 
         if abs(error) < ERROR_DEADBAND:
@@ -861,7 +908,7 @@ class Controller:
 
 
         # ========================================================
-        # NORMAL PID
+        # PID + GYRO
         # ========================================================
 
         correction = (
@@ -890,59 +937,77 @@ class Controller:
         )
 
 
-        # ========================================================
-        # FRONT SAFETY
-        # ========================================================
-
-        (
-            front_correction,
-            front_stop,
-            front_mode
-        ) = self.front_safety(
-            fl,
-            fr
-        )
+        front_mode = "OFF"
+        side_mode = "OFF"
 
 
         # ========================================================
-        # BOTH FRONT SENSORS TOO CLOSE
+        # COLLISION SAFETY
         # ========================================================
 
-        if front_stop:
+        if use_collision_safety:
 
-            return (
-                0.0,
-                0.0,
-                "FRONT_STOP",
-                error,
-                front_mode,
-                "STOP"
+            (
+                front_correction,
+                front_stop,
+                front_mode
+            ) = self.front_safety(
+                fl,
+                fr
             )
 
 
+            # ----------------------------------------------------
+            # BOTH FRONT TOO CLOSE
+            # ----------------------------------------------------
+
+            if front_stop:
+
+                return (
+                    0.0,
+                    0.0,
+                    "FRONT_STOP",
+                    error,
+                    front_mode,
+                    "STOP"
+                )
+
+
+            (
+                side_correction,
+                side_mode
+            ) = self.side_safety(
+                sl,
+                sr
+            )
+
+
+            correction += (
+                front_correction
+                +
+                side_correction
+            )
+
+
+            if front_mode != "CLEAR":
+
+                speed = min(
+                    speed,
+                    FRONT_AVOID_SPEED
+                )
+
+
+            if side_mode != "CLEAR":
+
+                speed = min(
+                    speed,
+                    2.8
+                )
+
+
         # ========================================================
-        # SIDE SAFETY
+        # CORRECTION LIMIT
         # ========================================================
-
-        (
-            side_correction,
-            side_mode
-        ) = self.side_safety(
-            sl,
-            sr
-        )
-
-
-        # ========================================================
-        # COMBINE
-        # ========================================================
-
-        correction += (
-            front_correction
-            +
-            side_correction
-        )
-
 
         correction = self.clamp(
             correction,
@@ -952,27 +1017,7 @@ class Controller:
 
 
         # ========================================================
-        # SAFETY SPEED REDUCTION
-        # ========================================================
-
-        if front_mode != "CLEAR":
-
-            speed = min(
-                speed,
-                FRONT_AVOID_SPEED
-            )
-
-
-        if side_mode != "CLEAR":
-
-            speed = min(
-                speed,
-                2.8
-            )
-
-
-        # ========================================================
-        # SLEW LIMITER
+        # SLEW
         # ========================================================
 
         max_change = (
@@ -1005,7 +1050,7 @@ class Controller:
 
 
         # ========================================================
-        # WHEEL SPEED
+        # WHEELS
         # ========================================================
 
         left = (
@@ -1047,7 +1092,7 @@ class Controller:
 
 
     # ============================================================
-    # SAFE SPEED
+    # ADAPTIVE SPEED
     # ============================================================
 
     def get_safe_speed(
@@ -1095,51 +1140,360 @@ class Controller:
 
 
     # ============================================================
-    # FIRST SCAN DIRECTION
+    # CALCULATE LEFT / RIGHT PATH SCORES
+    #
+    # ALL 4 SENSORS
     # ============================================================
 
-    def choose_first_direction(
+    def calculate_path_scores(
         self,
         fl,
-        fr
+        fr,
+        sl,
+        sr
     ):
 
         flc = self.clean_sensor(
             fl,
-            DIRECTION_SENSOR_CAP
+            MAX_PATH_SENSOR_CAP
         )
 
 
         frc = self.clean_sensor(
             fr,
-            DIRECTION_SENSOR_CAP
+            MAX_PATH_SENSOR_CAP
         )
 
 
-        if flc > frc:
+        slc = self.clean_sensor(
+            sl,
+            MAX_PATH_SENSOR_CAP
+        )
+
+
+        src = self.clean_sensor(
+            sr,
+            MAX_PATH_SENSOR_CAP
+        )
+
+
+        # ========================================================
+        # LEFT SIDE
+        # ========================================================
+
+        left_score = (
+
+            MAX_PATH_FRONT_WEIGHT
+            *
+            flc
+
+            +
+
+            MAX_PATH_SIDE_WEIGHT
+            *
+            slc
+        )
+
+
+        # ========================================================
+        # RIGHT SIDE
+        # ========================================================
+
+        right_score = (
+
+            MAX_PATH_FRONT_WEIGHT
+            *
+            frc
+
+            +
+
+            MAX_PATH_SIDE_WEIGHT
+            *
+            src
+        )
+
+
+        return (
+            left_score,
+            right_score
+        )
+
+
+    # ============================================================
+    # CHOOSE MAX PATH
+    #
+    # Uses averaged:
+    #
+    # FL
+    # FR
+    # SL
+    # SR
+    # GYRO
+    # ============================================================
+
+    def choose_max_path(
+        self,
+        fl,
+        fr,
+        sl,
+        sr,
+        gz
+    ):
+
+        flc = self.clean_sensor(
+            fl,
+            MAX_PATH_SENSOR_CAP
+        )
+
+        frc = self.clean_sensor(
+            fr,
+            MAX_PATH_SENSOR_CAP
+        )
+
+        slc = self.clean_sensor(
+            sl,
+            MAX_PATH_SENSOR_CAP
+        )
+
+        src = self.clean_sensor(
+            sr,
+            MAX_PATH_SENSOR_CAP
+        )
+
+
+        (
+            left_score,
+            right_score
+        ) = self.calculate_path_scores(
+            flc,
+            frc,
+            slc,
+            src
+        )
+
+
+        difference = (
+            left_score
+            -
+            right_score
+        )
+
+
+        print()
+        print("==================================================")
+        print(" MAX PATH DECISION")
+        print("==================================================")
+
+        print(
+            f"FL avg = {flc:.3f}"
+        )
+
+        print(
+            f"FR avg = {frc:.3f}"
+        )
+
+        print(
+            f"SL avg = {slc:.3f}"
+        )
+
+        print(
+            f"SR avg = {src:.3f}"
+        )
+
+        print(
+            f"GZ avg = {gz:+.4f}"
+        )
+
+        print()
+
+        print(
+            f"LEFT SCORE  = "
+            f"{left_score:.4f}"
+        )
+
+        print(
+            f"RIGHT SCORE = "
+            f"{right_score:.4f}"
+        )
+
+        print(
+            f"DIFFERENCE  = "
+            f"{difference:+.4f}"
+        )
+
+        print()
+
+
+        # ========================================================
+        # LEFT CLEARLY BIGGER
+        # ========================================================
+
+        if (
+            left_score
+            >
+            right_score
+            +
+            MAX_PATH_MIN_DIFFERENCE
+        ):
+
+            print(
+                "MAX PATH = LEFT"
+            )
+
+            print("==================================================")
+            print()
+
 
             return (
                 +1,
-                "LEFT FRONT MORE OPEN -> LEFT"
+                (
+                    f"MAX LEFT "
+                    f"{left_score:.3f} > "
+                    f"RIGHT {right_score:.3f}"
+                )
+            )
+
+
+        # ========================================================
+        # RIGHT CLEARLY BIGGER
+        # ========================================================
+
+        if (
+            right_score
+            >
+            left_score
+            +
+            MAX_PATH_MIN_DIFFERENCE
+        ):
+
+            print(
+                "MAX PATH = RIGHT"
+            )
+
+            print("==================================================")
+            print()
+
+
+            return (
+                -1,
+                (
+                    f"MAX RIGHT "
+                    f"{right_score:.3f} > "
+                    f"LEFT {left_score:.3f}"
+                )
+            )
+
+
+        # ========================================================
+        # SCORES VERY CLOSE
+        #
+        # Use the currently working INVERTED side fallback:
+        #
+        # SL closer -> RIGHT
+        # SR closer -> LEFT
+        # ========================================================
+
+        if slc < src:
+
+            print(
+                "MAX SCORES CLOSE"
+            )
+
+            print(
+                "SL CLOSER -> RIGHT"
+            )
+
+            print("==================================================")
+            print()
+
+
+            return (
+                -1,
+                "MAX TIE -> SL CLOSER -> RIGHT"
+            )
+
+
+        else:
+
+            print(
+                "MAX SCORES CLOSE"
+            )
+
+            print(
+                "SR CLOSER -> LEFT"
+            )
+
+            print("==================================================")
+            print()
+
+
+            return (
+                +1,
+                "MAX TIE -> SR CLOSER -> LEFT"
+            )
+
+
+    # ============================================================
+    # FIRST TURN INITIAL DIRECTION
+    #
+    # Also uses ALL FOUR sensors.
+    # ============================================================
+
+    def choose_first_direction(
+        self,
+        fl,
+        fr,
+        sl,
+        sr
+    ):
+
+        (
+            left_score,
+            right_score
+        ) = self.calculate_path_scores(
+            fl,
+            fr,
+            sl,
+            sr
+        )
+
+
+        if left_score > right_score:
+
+            return (
+                +1,
+                (
+                    f"FIRST MAX LEFT "
+                    f"{left_score:.3f} > "
+                    f"{right_score:.3f}"
+                )
             )
 
 
         return (
             -1,
-            "RIGHT FRONT MORE OPEN -> RIGHT"
+            (
+                f"FIRST MAX RIGHT "
+                f"{right_score:.3f} > "
+                f"{left_score:.3f}"
+            )
         )
 
 
     # ============================================================
     # FIRST SCAN SCORE
     #
-    # Prefer BOTH beams being open.
+    # Uses ALL FOUR DISTANCE SENSORS.
+    #
+    # Gyro handles the angle.
     # ============================================================
 
     def first_scan_score(
         self,
         fl,
-        fr
+        fr,
+        sl,
+        sr
     ):
 
         flc = self.clean_sensor(
@@ -1147,36 +1501,73 @@ class Controller:
             SCAN_SENSOR_CAP
         )
 
-
         frc = self.clean_sensor(
             fr,
             SCAN_SENSOR_CAP
         )
 
+        slc = self.clean_sensor(
+            sl,
+            SCAN_SENSOR_CAP
+        )
 
-        near = min(
+        src = self.clean_sensor(
+            sr,
+            SCAN_SENSOR_CAP
+        )
+
+
+        # --------------------------------------------------------
+        # Prefer both front rays being open.
+        # --------------------------------------------------------
+
+        front_near = min(
             flc,
             frc
         )
 
 
-        far = max(
+        front_far = max(
             flc,
             frc
+        )
+
+
+        front_score = (
+
+            0.70
+            *
+            front_near
+
+            +
+
+            0.30
+            *
+            front_far
+        )
+
+
+        # --------------------------------------------------------
+        # Also use side space.
+        # --------------------------------------------------------
+
+        side_score = max(
+            slc,
+            src
         )
 
 
         return (
 
-            0.75
+            0.80
             *
-            near
+            front_score
 
             +
 
-            0.25
+            0.20
             *
-            far
+            side_score
         )
 
 
@@ -1197,7 +1588,9 @@ class Controller:
             reason
         ) = self.choose_first_direction(
             fl,
-            fr
+            fr,
+            sl,
+            sr
         )
 
 
@@ -1208,7 +1601,6 @@ class Controller:
 
 
         self.gyro_sum = 0.0
-
         self.gyro_samples = 0
 
 
@@ -1231,23 +1623,45 @@ class Controller:
         self.reset_pid()
 
 
+        direction = (
+            "LEFT"
+            if self.turn_dir > 0
+            else
+            "RIGHT"
+        )
+
+
         print()
         print("==================================================")
-        print(" FIRST TURN SCAN")
+        print(" FIRST TURN MAX SCAN")
         print("==================================================")
+
         print(
             f"FL={fl:.3f} "
-            f"FR={fr:.3f} "
+            f"FR={fr:.3f}"
+        )
+
+        print(
             f"SL={sl:.3f} "
             f"SR={sr:.3f}"
         )
-        print(
-            reason
-        )
+
         print()
+
         print(
-            "FINAL HEADING = EXACTLY 90 DEG"
+            f"Reason = {reason}"
         )
+
+        print(
+            f"SCAN = {direction}"
+        )
+
+        print()
+
+        print(
+            "FINAL HEADING WILL BE 90 DEG"
+        )
+
         print("==================================================")
         print()
 
@@ -1259,7 +1673,7 @@ class Controller:
 
 
     # ============================================================
-    # BRAKE FIRST
+    # FIRST BRAKE
     # ============================================================
 
     def brake_first(
@@ -1276,7 +1690,11 @@ class Controller:
         self.gyro_samples += 1
 
 
-        if self.brake_time >= BRAKE_TIME:
+        if (
+            self.brake_time
+            >=
+            BRAKE_TIME
+        ):
 
             self.gyro_bias = (
 
@@ -1315,6 +1733,8 @@ class Controller:
 
     def first_scan(
         self,
+        sl,
+        sr,
         fl,
         fr,
         gz,
@@ -1349,16 +1769,21 @@ class Controller:
         )
 
 
-        # IMPORTANT:
-        # use absolute physical rotation.
+        # Magnitude only.
         progress = abs(
             self.turn_angle
         )
 
 
+        # ========================================================
+        # ALL FOUR SENSOR SCORE
+        # ========================================================
+
         raw_score = self.first_scan_score(
             fl,
-            fr
+            fr,
+            sl,
+            sr
         )
 
 
@@ -1392,7 +1817,7 @@ class Controller:
 
 
         # ========================================================
-        # SAVE BEST FOR INFORMATION ONLY
+        # SAVE MAX
         # ========================================================
 
         if (
@@ -1413,8 +1838,9 @@ class Controller:
                     self.scan_filtered_score
                 )
 
-
-                self.best_angle = progress
+                self.best_angle = (
+                    progress
+                )
 
 
         # ========================================================
@@ -1430,16 +1856,25 @@ class Controller:
 
             print()
             print("==================================================")
-            print(" FIRST SCAN COMPLETE")
+            print(" FIRST MAX SCAN COMPLETE")
             print("==================================================")
+
             print(
-                f"Scan best = "
+                f"Best sensor angle = "
                 f"{self.best_angle:.2f}"
             )
-            print()
+
             print(
-                "FINAL TURN TARGET = 90 DEG"
+                f"Best score = "
+                f"{self.best_score:.3f}"
             )
+
+            print()
+
+            print(
+                "FINAL PHYSICAL HEADING = 90 DEG"
+            )
+
             print("==================================================")
             print()
 
@@ -1468,6 +1903,10 @@ class Controller:
             right = -SCAN_SPEED
 
 
+        # ========================================================
+        # LOG
+        # ========================================================
+
         now = time.monotonic()
 
 
@@ -1486,7 +1925,8 @@ class Controller:
                 f"FIRST_SCAN "
                 f"angle={progress:6.2f} "
                 f"score={self.scan_filtered_score:.3f} "
-                f"best={self.best_score:.3f}",
+                f"best={self.best_score:.3f} "
+                f"bestAngle={self.best_angle:.2f}",
                 flush=True
             )
 
@@ -1500,7 +1940,9 @@ class Controller:
     # ============================================================
     # FIRST ALIGN
     #
-    # Always align to physical 90 degrees.
+    # Scan may go to ~100.
+    #
+    # Final orientation comes back to EXACTLY 90.
     # ============================================================
 
     def first_align(
@@ -1553,19 +1995,25 @@ class Controller:
 
 
         # ========================================================
-        # EXACT 90
+        # FINISHED
         # ========================================================
 
-        if abs(error) <= ALIGN_TOLERANCE:
+        if (
+            abs(error)
+            <=
+            ALIGN_TOLERANCE
+        ):
 
             print()
             print("==================================================")
             print(" FIRST TURN COMPLETE")
             print("==================================================")
+
             print(
                 f"Final angle = "
                 f"{current_angle:.2f}"
             )
+
             print("==================================================")
             print()
 
@@ -1582,36 +2030,18 @@ class Controller:
 
 
         # ========================================================
-        # HARD LIMIT
-        #
-        # First-turn align also cannot spin forever.
+        # TIMEOUT
         # ========================================================
 
-        if current_angle >= TURN_HARD_LIMIT:
-
-            print(
-                f"FIRST TURN HARD LIMIT "
-                f"{current_angle:.2f}",
-                flush=True
-            )
-
-
-            self.mode = "TURN_STOP"
-
-            self.turn_stop_time = 0.0
-
-
-            return (
-                0.0,
-                0.0
-            )
-
-
-        if self.align_time >= ALIGN_TIMEOUT:
+        if (
+            self.align_time
+            >=
+            ALIGN_TIMEOUT
+        ):
 
             print(
                 f"FIRST ALIGN TIMEOUT "
-                f"{current_angle:.2f}",
+                f"angle={current_angle:.2f}",
                 flush=True
             )
 
@@ -1628,19 +2058,20 @@ class Controller:
 
 
         # ========================================================
-        # Need more angle
+        # DIRECTION
+        #
+        # Below 90:
+        # continue original direction.
+        #
+        # Above 90:
+        # reverse back toward 90.
         # ========================================================
 
         if error > 0.0:
 
-            direction = self.turn_dir
-
-
-        # ========================================================
-        # Went beyond 90 during scan.
-        #
-        # Rotate backwards toward 90.
-        # ========================================================
+            direction = (
+                self.turn_dir
+            )
 
         else:
 
@@ -1673,14 +2104,11 @@ class Controller:
         if direction > 0:
 
             left = -command
-
             right = +command
-
 
         else:
 
             left = +command
-
             right = -command
 
 
@@ -1722,86 +2150,311 @@ class Controller:
 
 
     # ============================================================
-    # CHOOSE TURN DIRECTION
+    # START MAX PATH SAMPLING
+    #
+    # STOP ROBOT while making the decision.
+    #
+    # This prevents collision while collecting data.
     # ============================================================
 
-    def choose_corner_direction(
+    def start_path_sample(
         self,
+        sl,
+        sr,
         fl,
         fr,
-        sl,
-        sr
+        gz
     ):
 
-        flc = self.clean_sensor(
-            fl,
-            DIRECTION_SENSOR_CAP
+        self.mode = "PATH_SAMPLE"
+
+
+        self.reset_path_samples()
+
+
+        self.path_last_fl = fl
+        self.path_last_fr = fr
+
+        self.path_last_sl = sl
+        self.path_last_sr = sr
+
+        self.path_last_gz = gz
+
+
+        self.reset_pid()
+
+
+        print()
+        print("==================================================")
+        print(" CORNER CONFIRMED")
+        print(" STOPPING FOR MAX PATH MEASUREMENT")
+        print("==================================================")
+
+        print(
+            f"FL={fl:.3f} "
+            f"FR={fr:.3f}"
         )
 
-
-        frc = self.clean_sensor(
-            fr,
-            DIRECTION_SENSOR_CAP
+        print(
+            f"SL={sl:.3f} "
+            f"SR={sr:.3f}"
         )
 
+        print(
+            f"GZ={gz:+.4f}"
+        )
 
-        # ========================================================
-        # FL more open -> LEFT
-        # ========================================================
-
-        if (
-            flc
-            >
-            frc + DIRECTION_MARGIN
-        ):
-
-            return (
-                +1,
-                "FL MORE OPEN -> LEFT"
-            )
-
-
-        # ========================================================
-        # FR more open -> RIGHT
-        # ========================================================
-
-        if (
-            frc
-            >
-            flc + DIRECTION_MARGIN
-        ):
-
-            return (
-                -1,
-                "FR MORE OPEN -> RIGHT"
-            )
-
-
-        # ========================================================
-        # FALLBACK
-        #
-        # INVERTED SIDE MAPPING
-        #
-        # SL closer -> RIGHT
-        # SR closer -> LEFT
-        # ========================================================
-
-        if sl < sr:
-
-            return (
-                -1,
-                "SL CLOSER -> RIGHT"
-            )
+        print("==================================================")
+        print()
 
 
         return (
-            +1,
-            "SR CLOSER -> LEFT"
+            0.0,
+            0.0
         )
 
 
     # ============================================================
-    # START NORMAL TURN
+    # MAX PATH SAMPLE STATE
+    # ============================================================
+
+    def path_sample(
+        self,
+        sl,
+        sr,
+        fl,
+        fr,
+        gz,
+        dt
+    ):
+
+        self.path_total_time += dt
+
+
+        # Keep last values.
+        self.path_last_fl = fl
+        self.path_last_fr = fr
+
+        self.path_last_sl = sl
+        self.path_last_sr = sr
+
+        self.path_last_gz = gz
+
+
+        # ========================================================
+        # ONLY USE SENSOR DATA WHEN BOT IS STABLE
+        # ========================================================
+
+        if abs(gz) <= MAX_PATH_GYRO_LIMIT:
+
+            flc = self.clean_sensor(
+                fl,
+                MAX_PATH_SENSOR_CAP
+            )
+
+            frc = self.clean_sensor(
+                fr,
+                MAX_PATH_SENSOR_CAP
+            )
+
+            slc = self.clean_sensor(
+                sl,
+                MAX_PATH_SENSOR_CAP
+            )
+
+            src = self.clean_sensor(
+                sr,
+                MAX_PATH_SENSOR_CAP
+            )
+
+
+            self.path_fl_sum += flc
+            self.path_fr_sum += frc
+
+            self.path_sl_sum += slc
+            self.path_sr_sum += src
+
+            self.path_gz_sum += gz
+
+
+            self.path_sample_count += 1
+
+            self.path_sample_time += dt
+
+
+        # ========================================================
+        # ENOUGH GOOD DATA
+        # ========================================================
+
+        enough_samples = (
+
+            self.path_sample_time
+            >=
+            MAX_PATH_SAMPLE_TIME
+
+            and
+
+            self.path_sample_count > 0
+        )
+
+
+        # ========================================================
+        # TIMEOUT FALLBACK
+        # ========================================================
+
+        sample_timeout = (
+
+            self.path_total_time
+            >=
+            MAX_PATH_SAMPLE_TIMEOUT
+        )
+
+
+        if (
+            enough_samples
+            or
+            sample_timeout
+        ):
+
+            # ----------------------------------------------------
+            # USE AVERAGE IF AVAILABLE
+            # ----------------------------------------------------
+
+            if self.path_sample_count > 0:
+
+                n = float(
+                    self.path_sample_count
+                )
+
+
+                avg_fl = (
+                    self.path_fl_sum
+                    /
+                    n
+                )
+
+                avg_fr = (
+                    self.path_fr_sum
+                    /
+                    n
+                )
+
+                avg_sl = (
+                    self.path_sl_sum
+                    /
+                    n
+                )
+
+                avg_sr = (
+                    self.path_sr_sum
+                    /
+                    n
+                )
+
+                avg_gz = (
+                    self.path_gz_sum
+                    /
+                    n
+                )
+
+
+            # ----------------------------------------------------
+            # NO STABLE SAMPLE:
+            # use most recent values.
+            # ----------------------------------------------------
+
+            else:
+
+                avg_fl = self.path_last_fl
+                avg_fr = self.path_last_fr
+
+                avg_sl = self.path_last_sl
+                avg_sr = self.path_last_sr
+
+                avg_gz = self.path_last_gz
+
+
+            (
+                direction,
+                reason
+            ) = self.choose_max_path(
+
+                avg_fl,
+                avg_fr,
+
+                avg_sl,
+                avg_sr,
+
+                avg_gz
+            )
+
+
+            # Current sensor values for logging.
+            current_sl = sl
+            current_sr = sr
+
+            current_fl = fl
+            current_fr = fr
+
+
+            self.reset_path_samples()
+
+
+            return self.start_90_turn(
+
+                direction,
+                reason,
+
+                current_sl,
+                current_sr,
+
+                current_fl,
+                current_fr
+            )
+
+
+        # ========================================================
+        # LOG WHILE SAMPLING
+        # ========================================================
+
+        now = time.monotonic()
+
+
+        if (
+            now
+            -
+            self.last_log
+            >
+            0.05
+        ):
+
+            self.last_log = now
+
+
+            print(
+                f"MAX_SAMPLE "
+                f"time={self.path_sample_time:.3f} "
+                f"total={self.path_total_time:.3f} "
+                f"n={self.path_sample_count:03d} "
+                f"FL={fl:.3f} "
+                f"FR={fr:.3f} "
+                f"SL={sl:.3f} "
+                f"SR={sr:.3f} "
+                f"GZ={gz:+.4f}",
+                flush=True
+            )
+
+
+        # IMPORTANT:
+        # robot stays stopped during max decision.
+        return (
+            0.0,
+            0.0
+        )
+
+
+    # ============================================================
+    # START EXACT 90 DEG TURN
     # ============================================================
 
     def start_90_turn(
@@ -1838,6 +2491,8 @@ class Controller:
         self.side_detector_armed = False
 
 
+        self.reset_path_samples()
+
         self.reset_pid()
 
 
@@ -1851,27 +2506,35 @@ class Controller:
 
         print()
         print("==================================================")
-        print(" CONFIRMED 90 DEG TURN")
+        print(" MAX PATH SELECTED")
         print("==================================================")
+
         print(
             f"SL={sl:.3f} "
             f"SR={sr:.3f}"
         )
+
         print(
             f"FL={fl:.3f} "
             f"FR={fr:.3f}"
         )
+
         print()
+
         print(
             f"Reason = {reason}"
         )
+
         print(
             f"TURN = {side}"
         )
+
         print()
+
         print(
-            "TARGET = 90 DEG ONLY"
+            "TURN TARGET = EXACT 90 DEG"
         )
+
         print("==================================================")
         print()
 
@@ -1883,7 +2546,7 @@ class Controller:
 
 
     # ============================================================
-    # BRAKE BEFORE NORMAL TURN
+    # BRAKE BEFORE 90 DEG TURN
     # ============================================================
 
     def brake_90(
@@ -1900,7 +2563,11 @@ class Controller:
         self.gyro_samples += 1
 
 
-        if self.brake_time >= BRAKE_TIME:
+        if (
+            self.brake_time
+            >=
+            BRAKE_TIME
+        ):
 
             self.gyro_bias = (
 
@@ -1923,8 +2590,16 @@ class Controller:
             self.mode = "TURN_90"
 
 
+            direction = (
+                "LEFT"
+                if self.turn_dir > 0
+                else
+                "RIGHT"
+            )
+
+
             print(
-                "90 TURN START",
+                f"90 DEG {direction} TURN START",
                 flush=True
             )
 
@@ -1936,13 +2611,13 @@ class Controller:
 
 
     # ============================================================
-    # NORMAL TURN
+    # EXACT 90 DEG TURN
     #
-    # CRITICAL FIX:
+    # IMPORTANT:
     #
-    # turned = abs(self.turn_angle)
+    # Angle measurement uses ABSOLUTE gyro rotation.
     #
-    # Therefore wrong gyro sign cannot make it rotate forever.
+    # Therefore wrong gyro sign cannot cause a 360 degree spin.
     # ============================================================
 
     def turn_90(
@@ -1983,7 +2658,7 @@ class Controller:
 
 
         # ========================================================
-        # ABSOLUTE PHYSICAL ROTATION
+        # PHYSICAL ROTATION MAGNITUDE
         # ========================================================
 
         turned = abs(
@@ -2002,16 +2677,22 @@ class Controller:
         # 90 DEG COMPLETE
         # ========================================================
 
-        if remaining <= TURN_TOLERANCE:
+        if (
+            remaining
+            <=
+            TURN_TOLERANCE
+        ):
 
             print()
             print("==================================================")
             print(" 90 DEG TURN COMPLETE")
             print("==================================================")
+
             print(
                 f"Turned = "
                 f"{turned:.2f} DEG"
             )
+
             print("==================================================")
             print()
 
@@ -2028,20 +2709,26 @@ class Controller:
 
 
         # ========================================================
-        # HARD 95 DEG STOP
+        # HARD STOP
         #
-        # NEVER KEEP ROTATING TO 180 / 270 / 360
+        # NO 180 / 270 / 360
         # ========================================================
 
         if turned >= TURN_HARD_LIMIT:
 
             print()
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            print(" HARD TURN ANGLE LIMIT")
+            print(" HARD TURN LIMIT")
+            print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
             print(
-                f"ANGLE = {turned:.2f}"
+                f"Angle = {turned:.2f}"
             )
-            print("STOPPING TURN")
+
+            print(
+                "FORCING TURN STOP"
+            )
+
             print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             print()
 
@@ -2061,7 +2748,11 @@ class Controller:
         # TIMEOUT
         # ========================================================
 
-        if self.turn_time >= TURN_TIMEOUT:
+        if (
+            self.turn_time
+            >=
+            TURN_TIMEOUT
+        ):
 
             print(
                 f"TURN TIMEOUT "
@@ -2082,7 +2773,7 @@ class Controller:
 
 
         # ========================================================
-        # TURN SPEED
+        # TURN CONTROL
         # ========================================================
 
         turn_rate = abs(
@@ -2112,7 +2803,7 @@ class Controller:
 
 
         # ========================================================
-        # SLOW DOWN NEAR 90
+        # SLOW NEAR 90
         # ========================================================
 
         if remaining < TURN_FINAL_ZONE:
@@ -2130,16 +2821,13 @@ class Controller:
 
 
         # ========================================================
-        # DIRECTION
+        # PHYSICAL DIRECTION
         #
-        # Only motor direction uses turn_dir.
-        #
-        # Angle measurement does NOT use turn_dir.
+        # +1 = LEFT
+        # -1 = RIGHT
         # ========================================================
 
         if self.turn_dir > 0:
-
-            # LEFT
 
             left = -command
 
@@ -2149,8 +2837,6 @@ class Controller:
 
 
         else:
-
-            # RIGHT
 
             left = +command
 
@@ -2212,11 +2898,14 @@ class Controller:
 
             self.mode = "SETTLE"
 
+
             self.settle_time = 0.0
 
 
             self.corner_timer = 0.0
 
+
+            self.reset_path_samples()
 
             self.reset_pid()
 
@@ -2243,7 +2932,7 @@ class Controller:
     ):
 
         # ========================================================
-        # SENSORS
+        # SENSOR DATA
         # ========================================================
 
         sl = float(
@@ -2314,6 +3003,8 @@ class Controller:
         if self.mode == "FIRST_SCAN":
 
             return self.first_scan(
+                sl,
+                sr,
                 fl,
                 fr,
                 gz,
@@ -2324,6 +3015,18 @@ class Controller:
         if self.mode == "FIRST_ALIGN":
 
             return self.first_align(
+                gz,
+                dt
+            )
+
+
+        if self.mode == "PATH_SAMPLE":
+
+            return self.path_sample(
+                sl,
+                sr,
+                fl,
+                fr,
                 gz,
                 dt
             )
@@ -2353,7 +3056,7 @@ class Controller:
 
 
         # ========================================================
-        # SETTLE
+        # SETTLE AFTER TURN
         # ========================================================
 
         if self.mode == "SETTLE":
@@ -2376,11 +3079,18 @@ class Controller:
                 fr,
                 gz,
                 dt,
-                SETTLE_SPEED
+
+                SETTLE_SPEED,
+
+                True
             )
 
 
-            if self.settle_time >= SETTLE_TIME:
+            if (
+                self.settle_time
+                >=
+                SETTLE_TIME
+            ):
 
                 self.mode = "DRIVE"
 
@@ -2403,6 +3113,8 @@ class Controller:
                 self.corner_timer = 0.0
 
 
+                self.reset_path_samples()
+
                 self.reset_pid()
 
 
@@ -2410,14 +3122,17 @@ class Controller:
                 print("==================================================")
                 print(" TURN COMPLETE -> DRIVE")
                 print("==================================================")
+
                 print(
-                    f"Turns = "
+                    f"Completed turns = "
                     f"{self.completed_turns}"
                 )
+
                 print(
                     f"Lockout = "
                     f"{POST_TURN_LOCKOUT:.1f}s"
                 )
+
                 print("==================================================")
                 print()
 
@@ -2447,10 +3162,12 @@ class Controller:
                 self.first_front_count = 0
 
 
+                print()
                 print(
                     "BOT INSIDE MAZE",
                     flush=True
                 )
+                print()
 
 
         # ========================================================
@@ -2484,7 +3201,7 @@ class Controller:
 
 
         # ========================================================
-        # DEFAULT FOR LOG
+        # DEFAULT LOG VARIABLE
         # ========================================================
 
         corner_now = False
@@ -2492,16 +3209,22 @@ class Controller:
 
         # ========================================================
         # FIRST TURN
+        #
+        # Keep original trigger.
+        #
+        # IMPORTANT:
+        # front collision protection is NOT used here because
+        # startup FL/FR readings may be small before maze entry.
         # ========================================================
 
         if self.completed_turns == 0:
 
-            navigation_mode = "FIRST_TURN"
+            navigation_mode = "FIRST_MAX"
 
 
             if self.inside_maze:
 
-                front_close = (
+                first_close = (
 
                     fl <= FIRST_FRONT_DIST
 
@@ -2511,7 +3234,7 @@ class Controller:
                 )
 
 
-                if front_close:
+                if first_close:
 
                     self.first_front_count += 1
 
@@ -2537,17 +3260,47 @@ class Controller:
             forward_speed = BASE_SPEED
 
 
+            # ----------------------------------------------------
+            # FIRST-TURN DRIVE:
+            #
+            # Normal side PID only.
+            # ----------------------------------------------------
+
+            (
+                left,
+                right,
+                drive_mode,
+                error,
+                front_mode,
+                side_mode
+            ) = self.pid_drive(
+
+                sl,
+                sr,
+                fl,
+                fr,
+                gz,
+                dt,
+
+                forward_speed,
+
+                False
+            )
+
+
         # ========================================================
         # AFTER FIRST TURN
         # ========================================================
 
         else:
 
-            navigation_mode = "CORNER_90_ONLY"
+            navigation_mode = "MAX_4_SENSOR"
 
 
             # ====================================================
             # ARM CORNER DETECTOR
+            #
+            # Must leave previous corner before another turn.
             # ====================================================
 
             if not self.side_detector_armed:
@@ -2574,7 +3327,7 @@ class Controller:
 
 
             # ====================================================
-            # CORNER CONDITION
+            # CHECK REAL CORNER
             # ====================================================
 
             corner_now = self.corner_condition(
@@ -2585,9 +3338,7 @@ class Controller:
 
             if (
                 self.side_detector_armed
-
                 and
-
                 not lockout_active
             ):
 
@@ -2601,7 +3352,9 @@ class Controller:
 
 
                 # =================================================
-                # CONFIRMED CORNER
+                # REAL CORNER CONFIRMED
+                #
+                # STOP AND SAMPLE ALL 4 SENSORS.
                 # =================================================
 
                 if (
@@ -2610,26 +3363,13 @@ class Controller:
                     CORNER_CONFIRM_TIME
                 ):
 
-                    (
-                        direction,
-                        reason
-                    ) = self.choose_corner_direction(
-                        fl,
-                        fr,
-                        sl,
-                        sr
-                    )
-
-
-                    return self.start_90_turn(
-
-                        direction,
-                        reason,
+                    return self.start_path_sample(
 
                         sl,
                         sr,
                         fl,
-                        fr
+                        fr,
+                        gz
                     )
 
 
@@ -2639,26 +3379,65 @@ class Controller:
 
 
             # ====================================================
-            # EMERGENCY SIDE DISTANCE
+            # FRONT DEAD-END SAFETY
+            #
+            # BOTH front <=0.10.
+            #
+            # If lockout finished:
+            # don't sit forever.
+            #
+            # Stop and make MAX decision.
             # ====================================================
 
-            if (
+            front_dead_end = (
+
+                fl <= FRONT_SAFE_DIST
+
+                and
+
+                fr <= FRONT_SAFE_DIST
+            )
+
+
+            if front_dead_end:
+
+                if not lockout_active:
+
+                    return self.start_path_sample(
+
+                        sl,
+                        sr,
+                        fl,
+                        fr,
+                        gz
+                    )
+
+
+            # ====================================================
+            # EXTREME SIDE DANGER
+            # ====================================================
+
+            side_emergency = (
+
                 sl <= SIDE_EMERGENCY_DIST
 
                 or
 
                 sr <= SIDE_EMERGENCY_DIST
-            ):
+            )
+
+
+            if side_emergency:
 
                 # ------------------------------------------------
                 # During lockout:
-                # STOP.
+                # STOP instead of collision.
                 # ------------------------------------------------
 
                 if lockout_active:
 
                     print(
-                        f"EMERGENCY STOP "
+                        f"EMERGENCY SAFETY STOP "
                         f"SL={sl:.3f} "
                         f"SR={sr:.3f}",
                         flush=True
@@ -2672,31 +3451,17 @@ class Controller:
 
 
                 # ------------------------------------------------
-                # Lockout done:
-                # exact 90 degree escape turn.
+                # Lockout over:
+                # stop and sample MAX path.
                 # ------------------------------------------------
 
-                (
-                    direction,
-                    reason
-                ) = self.choose_corner_direction(
-                    fl,
-                    fr,
-                    sl,
-                    sr
-                )
-
-
-                return self.start_90_turn(
-
-                    direction,
-
-                    "EMERGENCY " + reason,
+                return self.start_path_sample(
 
                     sl,
                     sr,
                     fl,
-                    fr
+                    fr,
+                    gz
                 )
 
 
@@ -2711,27 +3476,30 @@ class Controller:
             )
 
 
-        # ========================================================
-        # STRAIGHT DRIVE
-        # ========================================================
+            # ====================================================
+            # PID + COLLISION SAFETY
+            # ====================================================
 
-        (
-            left,
-            right,
-            drive_mode,
-            error,
-            front_mode,
-            side_mode
-        ) = self.pid_drive(
+            (
+                left,
+                right,
+                drive_mode,
+                error,
+                front_mode,
+                side_mode
+            ) = self.pid_drive(
 
-            sl,
-            sr,
-            fl,
-            fr,
-            gz,
-            dt,
-            forward_speed
-        )
+                sl,
+                sr,
+                fl,
+                fr,
+                gz,
+                dt,
+
+                forward_speed,
+
+                True
+            )
 
 
         # ========================================================
@@ -2760,6 +3528,7 @@ class Controller:
                 f"FR={fr:.3f} "
                 f"SL={sl:.3f} "
                 f"SR={sr:.3f} "
+                f"GZ={gz:+.3f} "
                 f"speed={forward_speed:.2f} "
                 f"front={front_mode} "
                 f"side={side_mode} "
@@ -2780,14 +3549,14 @@ class Controller:
 
 
 # ================================================================
-# CONTROLLER
+# CONTROLLER INSTANCE
 # ================================================================
 
 controller = Controller()
 
 
 # ================================================================
-# MQTT CALLBACK
+# MQTT MESSAGE
 # ================================================================
 
 def on_message(
@@ -2828,6 +3597,7 @@ def on_message(
         )
 
 
+        # Safety stop on error.
         client.publish(
             TOPIC_WHEEL_VEL,
             json.dumps(
@@ -2872,39 +3642,55 @@ def main():
 
     print()
     print("==================================================")
-    print(" PACBOT - EXACT 90 DEG CONTROLLER")
+    print(" PACBOT - MAX 4 SENSOR + EXACT 90")
     print("==================================================")
     print()
-    print("SPEED:")
+    print("CLEAR SPEED:")
     print()
-    print(" CLEAR = 5.0")
+    print(" 5.0")
     print()
     print("FIRST TURN:")
     print()
+    print(" old trigger:")
     print(" FL <= 0.14 OR FR <= 0.14")
-    print(" scan direction")
-    print(" final heading = EXACT 90 DEG")
+    print()
+    print(" direction uses:")
+    print(" FL + FR + SL + SR")
+    print()
+    print(" scan score also uses all 4 sensors")
+    print()
+    print(" final physical heading = 90 deg")
     print()
     print("AFTER FIRST TURN:")
     print()
-    print(" confirmed corners only")
+    print(" confirmed corner only:")
     print()
     print(" min(SL,SR) <= 0.12")
     print(" AND")
     print(" max(SL,SR) <= 0.16")
     print()
+    print(" then robot STOPS")
+    print(" averages FL FR SL SR")
+    print(" waits for stable gyro")
+    print()
+    print("LEFT MAX SCORE:")
+    print(" 0.60*FL + 0.40*SL")
+    print()
+    print("RIGHT MAX SCORE:")
+    print(" 0.60*FR + 0.40*SR")
+    print()
+    print("larger score wins")
+    print()
     print("TURN:")
     print()
-    print(" ALWAYS 90 DEG")
-    print(" HARD STOP AT 95 DEG")
-    print()
-    print("NO 180 / 270 / 360 TURN")
+    print(" exact 90 deg only")
+    print(" hard stop at 95 deg")
+    print(" no 180 / 270 / 360")
     print()
     print("COLLISION SAFETY:")
     print()
     print(" FL <= 0.10 -> steer RIGHT")
     print(" FR <= 0.10 -> steer LEFT")
-    print()
     print(" SL <= 0.11 -> steer RIGHT")
     print(" SR <= 0.11 -> steer LEFT")
     print()
